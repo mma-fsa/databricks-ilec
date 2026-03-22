@@ -1,0 +1,24 @@
+# A sample job for ilec_pipeline.
+
+resources:
+  jobs:
+    train_model:
+      name: train_model
+
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: schema
+          default: ${var.schema}
+
+      tasks:
+        - task_key: notebook_task
+          notebook_task:
+            notebook_path: ../src/model/model.py
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "5"
+            dependencies:    
+              - ../dist/*.whl
