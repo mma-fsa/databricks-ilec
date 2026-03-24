@@ -10,6 +10,7 @@
 import pandas as pd, numpy as np
 from pyspark.sql import functions as F
 import xgboost, sklearn
+import tempfile, os, mlflow, joblib
 
 # COMMAND ----------
 
@@ -160,41 +161,128 @@ np.sum(preds) / np.sum(y_val)
 
 # COMMAND ----------
 
-import mlflow
-import joblib
+preprocessor.get_feature_names_out()
+array(['Sex_F', 'Smoker_Status_S', 'Smoker_Status_U', 'Face_Amount_Band',
+       'Attained_Age'], dtype=object)
+
+# COMMAND ----------
+
+preprocessor.output_indices_
+
+# COMMAND ----------
 
 class PoissonXgbModel(mlflow.pyfunc.PythonModel):
-    
+
+    INPUT_COLS = [
+        "Sex",
+        "Smoker_Status",
+        "Face_Amount_Band",
+        "Attained_Age"
+    ]
+    OFFSET_COL = "ExpDth_VBT2015wMI_Cnt"  
+
     def load_context(self, context):
         self.preprocessor = joblib.load(context.artifacts["preprocessor"])
         self.booster = xgb.Booster()
         self.booster.load_model(context.artifacts["booster"])
 
-    def predict(self, context, model_input, params=None):
+    def _load_from_memory(self, 
+                          bst : xgboost.Booster, 
+                          preproc : sklearn.base.TransformerMixin):
+        self.preprocessor = preproc
+        self.booster = bst
+
+    def predict(self, context, model_input : pd.DataFrame, params=None):
         
         import numpy as np
 
-        FEATURE_COLS = ["Sex", "Smoker_Status", "Face_Amount_Band", "Attained_Age"]
-        OFFSET_COL = "ExpDth_VBT2015wMI_Cnt"
-      
         if not isinstance(model_input, pd.DataFrame):
             raise Exception(f"Expected model_input to be pandas DataFrame, got: {str(type(model_input))}")
         
-        if OFFSET_COL in model_input.columns:
-            offset_col = np.log(model_input[OFFSET_COL].to_numpy())
-        else:
-            offset_col = np.zeros(())
-                
-        X = model_input[FEATURE_COLS]
-        X_proc = self.preprocessor.transform(X)
+        offset_col = PoissonXgbModel.OFFSET_COL
 
-        if offset_col is not None:
-            base_margin = np.log(model_input[OFFSET_COL].to_numpy())
-            dmat = xgb.DMatrix(X_proc, base_margin=base_margin)
+        if PoissonXgbModel.OFFSET_COL in model_input.columns:
+            offset_col = np.log(model_input[offset_col].to_numpy())
         else:
-            dmat = xgb.DMatrix(X_proc)
+            offset_col = np.zeros((model_input.shape[0]))
+
+        X_proc = self.preprocessor.transform(model_input)
+        dmat = xgb.DMatrix(X_proc, base_margin=offset_col)
 
         preds = self.booster.predict(dmat)
 
         # Return DataFrame for stable serving output schema
         return pd.DataFrame({"prediction": preds})
+
+# write model artfifacts 
+def serialize_artifacts(tmpdir : tempfile.TemporaryDirectory):
+    booster_path = os.path.join(tmpdir, "model.json")
+    bst.save_model(booster_path)
+
+    preproc_path = os.path.join(tmpdir, "preprocessor.joblib")
+    joblib.dump(preprocessor, preproc_path)
+
+    return (booster_path, preproc_path)
+
+# test serialization
+run_model = PoissonXgbModel()
+with tempfile.TemporaryDirectory() as tmpdir:
+    booster_path, preproc_path = serialize_artifacts(tmpdir)
+    new_bst = xgboost.Booster()
+    new_bst.load_model(booster_path)
+    new_preproc = joblib.load(preproc_path)
+    run_model._load_from_memory(
+        new_bst,
+        new_preproc,
+    )
+    df_test_run = run_model.predict({}, df_train) 
+
+df_test_run["prediction"].sum() / df_train["Death_Count"].sum()
+
+# COMMAND ----------
+
+with tempfile.TemporaryDirectory() as tmpdir:
+    
+    input_example = df_train[PoissonXgbModel.INPUT_COLS].head(5).copy()
+    
+    signature = infer_signature(
+        input_example,
+        pd.DataFrame({"prediction": np.asarray(df_test_run[: len(input_example)])}),
+        params={"offset_col": "offset"}  # optional param schema
+    )
+
+    with mlflow.start_run() as run:
+        # Useful metadata / metrics
+        mlflow.log_params(params)
+        mlflow.log_metric("val_sum_pred_over_sum_actual", float(np.sum(val_preds) / np.sum(y_val)))
+        mlflow.log_metric("best_iteration", int(bst.best_iteration))
+
+        # Optional: also log the native booster flavor
+        mlflow.xgboost.log_model(
+            xgb_model=bst,
+            name="xgb_native",
+            model_format="json",
+        )
+
+        # Deployable pyfunc
+        pyfunc_info = mlflow.pyfunc.log_model(
+            name="model",
+            python_model=PoissonXgbModel(),
+            artifacts={
+                "booster": booster_path,
+                "preprocessor": preproc_path,
+            },
+            pip_requirements=[
+                f"mlflow=={mlflow.__version__}",
+                f"xgboost=={xgb.__version__}",
+                f"scikit-learn=={__import__('sklearn').__version__}",
+                f"pandas=={pd.__version__}",
+                f"numpy=={np.__version__}",
+                f"joblib=={joblib.__version__}",
+            ],
+            input_example=input_example,
+            signature=signature,
+        )
+
+        print("PyFunc model URI:", pyfunc_info.model_uri)
+        print("Run ID:", run.info.run_id)
