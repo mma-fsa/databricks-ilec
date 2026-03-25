@@ -162,12 +162,6 @@ np.sum(preds) / np.sum(y_val)
 # COMMAND ----------
 
 preprocessor.get_feature_names_out()
-array(['Sex_F', 'Smoker_Status_S', 'Smoker_Status_U', 'Face_Amount_Band',
-       'Attained_Age'], dtype=object)
-
-# COMMAND ----------
-
-preprocessor.output_indices_
 
 # COMMAND ----------
 
@@ -199,9 +193,9 @@ class PoissonXgbModel(mlflow.pyfunc.PythonModel):
         if not isinstance(model_input, pd.DataFrame):
             raise Exception(f"Expected model_input to be pandas DataFrame, got: {str(type(model_input))}")
         
-        offset_col = PoissonXgbModel.OFFSET_COL
+        offset_col = "ExpDth_VBT2015wMI_Cnt"
 
-        if PoissonXgbModel.OFFSET_COL in model_input.columns:
+        if offset_col in model_input.columns.to_list():
             offset_col = np.log(model_input[offset_col].to_numpy())
         else:
             offset_col = np.zeros((model_input.shape[0]))
@@ -245,16 +239,17 @@ with tempfile.TemporaryDirectory() as tmpdir:
     
     input_example = df_train[PoissonXgbModel.INPUT_COLS].head(5).copy()
     
-    signature = infer_signature(
+    signature = mlflow.models.infer_signature(
         input_example,
-        pd.DataFrame({"prediction": np.asarray(df_test_run[: len(input_example)])}),
-        params={"offset_col": "offset"}  # optional param schema
+        pd.DataFrame(df_test_run[: len(input_example)]),
+        params={}  # optional param schema
     )
 
     with mlflow.start_run() as run:
         # Useful metadata / metrics
         mlflow.log_params(params)
-        mlflow.log_metric("val_sum_pred_over_sum_actual", float(np.sum(val_preds) / np.sum(y_val)))
+        ae_ratio_train = float(df_test_run["prediction"].sum() / np.sum(y_train))
+        mlflow.log_metric("val_sum_pred_over_sum_actual", ae_ratio_train)
         mlflow.log_metric("best_iteration", int(bst.best_iteration))
 
         # Optional: also log the native booster flavor
@@ -265,6 +260,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
         )
 
         # Deployable pyfunc
+        booster_path, preproc_path = serialize_artifacts(tmpdir)
         pyfunc_info = mlflow.pyfunc.log_model(
             name="model",
             python_model=PoissonXgbModel(),
@@ -286,3 +282,11 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
         print("PyFunc model URI:", pyfunc_info.model_uri)
         print("Run ID:", run.info.run_id)
+
+# COMMAND ----------
+
+signature
+
+# COMMAND ----------
+
+
