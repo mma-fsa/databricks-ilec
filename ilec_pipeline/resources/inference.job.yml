@@ -1,0 +1,26 @@
+# A sample job for ilec_pipeline.
+
+resources:
+  jobs:
+    run_inference:
+      name: run_inference
+      parameters:
+        - name: catalog
+          default: ${var.catalog}
+        - name: input_schema
+          default: ${var.schema}
+        - name: input_table
+          default: ilec_data
+        - name: output_schema
+          default: ${var.schema}
+        - name: output_table
+          default: ilec_data_preds
+        - name: model_uri
+          default: models:/workspace.mlops_dev.ilec_pipeline/2
+        
+      tasks:
+        - task_key: notebook_task
+          notebook_task:
+            notebook_path: ../src/model/inference.py
+
+
