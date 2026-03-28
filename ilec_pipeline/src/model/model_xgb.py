@@ -1,11 +1,8 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
+# base_environment = "/Workspace/Users/mr.anderson.1725@gmail.com/databricks-ilec/ilec_pipeline/src/model/model_environment.yaml"
 # environment_version = "5"
-# dependencies = [
-#   "xgboost==3.2.0",
-#   "scikit-learn==1.8",
-# ]
 # ///
 import pandas as pd, numpy as np
 from pyspark.sql import functions as F
