@@ -14,7 +14,7 @@ resources:
       tasks:
         - task_key: notebook_task
           notebook_task:
-            notebook_path: ../src/model/model.py
+            notebook_path: ../src/model/model_xgb.py
 
       environments:
         - environment_key: default

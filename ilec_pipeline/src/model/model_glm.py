@@ -13,8 +13,15 @@ import tempfile, os, mlflow, joblib
 
 # COMMAND ----------
 
-catalog = dbutils.widgets.get("catalog")
-schema = dbutils.widgets.get("schema")
+def safe_get(var_name, default):
+    try:
+        return dbutils.widgets.get(var_name)
+    except KeyError:
+        return default
+
+catalog = safe_get("catalog", "workspace")
+schema = safe_get("schema", "mlops_dev")
+
 tbl_ilec_data = (
     spark.read.table(f"{catalog}.{schema}.ilec_data")
     .filter(
