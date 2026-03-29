@@ -4,6 +4,11 @@
 # base_environment = "/Workspace/Users/mr.anderson.1725@gmail.com/databricks-ilec/ilec_pipeline/src/model/model_environment.yaml"
 # environment_version = "5"
 # ///
+from src.model.util import *
+
+
+# COMMAND ----------
+
 import pandas as pd, numpy as np
 from pyspark.sql import functions as F
 import formulaic as frm, sklearn as sk, glum as glm
