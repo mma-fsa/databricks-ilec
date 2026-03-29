@@ -4,8 +4,8 @@
 # base_environment = "/Workspace/Users/mr.anderson.1725@gmail.com/databricks-ilec/ilec_pipeline/src/model/model_environment.yaml"
 # environment_version = "5"
 # ///
-from src.model.util import *
-
+from src.model.util.glm import PoissonGLMFactorAnalysis
+from src.model.util.tree import PoissonDecisionTree
 
 # COMMAND ----------
 
@@ -13,7 +13,6 @@ import pandas as pd, numpy as np
 from pyspark.sql import functions as F
 import formulaic as frm, sklearn as sk, glum as glm
 from sklearn.metrics import d2_tweedie_score
-from sklearn.tree import DecisionTreeRegressor
 import tempfile, os, mlflow, joblib
 
 # COMMAND ----------
@@ -21,7 +20,7 @@ import tempfile, os, mlflow, joblib
 def safe_get(var_name, default):
     try:
         return dbutils.widgets.get(var_name)
-    except KeyError:
+    except:
         return default
 
 catalog = safe_get("catalog", "workspace")
@@ -99,11 +98,26 @@ glmnet.fit(
 
 # COMMAND ----------
 
-x_mat_formula.required_variables
+df_train["model_pred"] = glmnet.predict(X_train, offset=offset_train)
+dtree = PoissonDecisionTree("Death_Count", "model_pred")
+dtree.fit(df_train.drop("ExpDth_VBT2015wMI_Cnt", axis=1))
+print(dtree)
+
 
 # COMMAND ----------
 
-X_train.model_spec.variable_terms
+factor_analysis = PoissonGLMFactorAnalysis(
+    glmnet.coef_table(),
+    X_train.model_spec)
+
+factor_analysis.get_factor_map()
+
+
+# COMMAND ----------
+
+model_factors = factor_analysis.get_factor_analysis(df_train)
+
+model_factors[2]
 
 # COMMAND ----------
 

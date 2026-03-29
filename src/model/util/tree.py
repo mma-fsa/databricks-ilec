@@ -119,7 +119,8 @@ def poisson_deviance(y, mu):
     mu = np.asarray(mu, dtype=float)
     if np.any(mu <= 0):
         raise ValueError("All fitted means mu must be > 0.")
-    term = np.where(y > 0, y * np.log(y / mu), 0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        term = np.where(y > 0, y * np.log(y / mu), 0.0)
     return 2.0 * np.sum(term - (y - mu))
 
 
