@@ -1,10 +1,10 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
-# base_environment = "/Workspace/Users/mr.anderson.1725@gmail.com/databricks-ilec/ilec_pipeline/src/model/model_environment.yaml"
+# base_environment = "model_environment.yaml"
 # environment_version = "5"
 # ///
-from src.model.util.glm import PoissonGLMFactorAnalysis
+from src.model.util.glm import PoissonGLMFactorAnalysis, set_df_categoricals
 from src.model.util.tree import PoissonDecisionTree
 
 # COMMAND ----------
@@ -75,11 +75,21 @@ x_mat_formula = frm.Formula(" ~ cr(Attained_Age, df=4, lower_bound=18, upper_bou
 
 # COMMAND ----------
 
-X_train = x_mat_formula.get_model_matrix(df_train)
+default_levels = {
+    "Sex": "M",
+    "Smoker_Status": "NS",
+    "Face_Amount_Band" : "05: 100,000 - 249,999" 
+}
+
+X_train = x_mat_formula.get_model_matrix(
+    set_df_categoricals(df_train, default_levels)
+)
 offset_train = np.log(df_train["ExpDth_VBT2015wMI_Cnt"])
 y_train = df_train["Death_Count"]
 
-X_val = x_mat_formula.get_model_matrix(df_test)
+X_val = x_mat_formula.get_model_matrix(
+    set_df_categoricals(df_test, default_levels)
+)
 offset_val = np.log(df_test["ExpDth_VBT2015wMI_Cnt"])
 y_val = df_test["Death_Count"]
 
@@ -106,18 +116,38 @@ print(dtree)
 
 # COMMAND ----------
 
-factor_analysis = PoissonGLMFactorAnalysis(
-    glmnet.coef_table(),
-    X_train.model_spec)
+coef_at_idx = np.zeros(glmnet.coef_path_.shape[1] + 1)
+coef_at_idx[0] = glmnet.intercept_path_[99]
+coef_at_idx[1:] = glmnet.coef_path_[99, :]
 
-factor_analysis.get_factor_map()
+coef_at_idx - glmnet.coef_table().to_numpy()
 
 
 # COMMAND ----------
 
-model_factors = factor_analysis.get_factor_analysis(df_train)
 
-model_factors[2]
+
+# COMMAND ----------
+
+factor_analysis = PoissonGLMFactorAnalysis(
+    glmnet.coef_table(),
+    X_train.model_spec)
+
+display(factor_analysis.get_factor_map())
+
+
+# COMMAND ----------
+
+factors = factor_analysis.get_factor_analysis(df_train)
+factors[0]
+
+# COMMAND ----------
+
+factors[2]
+
+# COMMAND ----------
+
+display(factor_analysis.append_factor_preds(df_train))
 
 # COMMAND ----------
 

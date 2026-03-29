@@ -1,8 +1,34 @@
 import pandas as pd, numpy as np
 import formulaic as frm
-from pandas.api.types import is_numeric_dtype
+from pandas.api.types import is_numeric_dtype, is_object_dtype, is_string_dtype
 from typing import Dict, Iterable, List, Sequence
 import glum as glm
+
+def set_df_categoricals(df: pd.DataFrame, default_levels: Dict[str, str]) -> pd.DataFrame:
+    result = df.copy()
+
+    for column_name, default_level in default_levels.items():
+        if column_name not in result.columns:
+            raise KeyError(f"Column '{column_name}' not found in dataframe.")
+
+        series = result[column_name]
+
+        if isinstance(series.dtype, pd.CategoricalDtype):
+            categories = [default_level] + [category for category in series.cat.categories if category != default_level]
+            result[column_name] = series.cat.set_categories(categories, ordered=series.cat.ordered)
+            continue
+
+        if not (is_object_dtype(series.dtype) or is_string_dtype(series.dtype)):
+            raise TypeError(f"Column '{column_name}' must be an object, string, or categorical dtype.")
+
+        non_null = series.dropna()
+        if not non_null.map(lambda value: isinstance(value, str)).all():
+            raise TypeError(f"Column '{column_name}' must contain only string values.")
+
+        categories = [default_level] + [level for level in pd.Index(non_null).drop_duplicates().tolist() if level != default_level]
+        result[column_name] = pd.Categorical(series, categories=categories)
+
+    return result
 
 class PoissonGLMFactorAnalysis():
     
@@ -101,6 +127,35 @@ class PoissonGLMFactorAnalysis():
             factor_tables.append(factor_table)
 
         return factor_tables
+
+    def append_factor_preds(self, df: pd.DataFrame) -> pd.DataFrame:
+        factor_tables = self.get_factor_analysis(df)
+        df_with_factors = df.copy()
+        factor_columns: List[str] = []
+
+        for factor_table in factor_tables:
+            term_group = str(factor_table["term_group"].iat[0])
+            factor_column = f"factor_{term_group}"
+            join_columns = [
+                column_name
+                for column_name in factor_table.columns
+                if column_name not in {"factor", "term_group"}
+            ]
+
+            if join_columns:
+                df_with_factors = df_with_factors.merge(
+                    factor_table.loc[:, join_columns + ["factor"]].rename(columns={"factor": factor_column}),
+                    on=join_columns,
+                    how="left",
+                    validate="many_to_one",
+                )
+            else:
+                df_with_factors[factor_column] = float(factor_table["factor"].iat[0])
+
+            factor_columns.append(factor_column)
+
+        df_with_factors["model_pred"] = df_with_factors.loc[:, factor_columns].prod(axis=1)
+        return df_with_factors
     
     # you may modify inputs, do not change the output type
     def _create_term_groups(self) -> Dict[str, List[str]]:
