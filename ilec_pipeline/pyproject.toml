@@ -25,13 +25,14 @@ dev = [
     "mlflow==3.8.1",
     "databricks-sdk[notebook]>=0.102.0",
     "graphviz==0.21",
+    "hatchling>=1.29.0",
 ]
 
-#[project.scripts]
-#main = "ilec_pipeline.main:main"
+[project.scripts]
+build_lib_wheel = "lib.wheel_task:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/model"]
+packages = ["src/lib"]
 
 [build-system]
 requires = ["hatchling"]

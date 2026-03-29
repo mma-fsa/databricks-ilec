@@ -5,16 +5,13 @@ from pathlib import Path
 import formulaic as frm
 import glum as glm
 
-
 from src.lib.glm import PoissonGLMFactorAnalysis
-
 
 TRAINING_DATA = Path(__file__).resolve().parents[1] / "fixtures" / "df_train.parquet"
 MODEL_FORMULA = (
     " ~ cr(Attained_Age, df=4, lower_bound=18, upper_bound=90 )*Smoker_Status*Sex"
     " + Face_Amount_Band*Sex + Face_Amount_Band * Smoker_Status - 1"
 )
-
 
 def fit_model(df_train: pd.DataFrame):
     x_mat_formula = frm.Formula(MODEL_FORMULA)
