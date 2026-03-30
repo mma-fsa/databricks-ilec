@@ -154,7 +154,7 @@ class PoissonGLMFactorAnalysis():
 
         return factor_tables
 
-    def append_factor_preds(self, df: pd.DataFrame) -> pd.DataFrame:
+    def append_factor_preds(self, df: pd.DataFrame, colname_model_pred = "model_pred") -> pd.DataFrame:
         factor_tables = self.get_factor_analysis(df)
         df_with_factors = df.copy()
         factor_columns: List[str] = []
@@ -180,7 +180,7 @@ class PoissonGLMFactorAnalysis():
 
             factor_columns.append(factor_column)
 
-        df_with_factors["model_pred"] = df_with_factors.loc[:, factor_columns].prod(axis=1)
+        df_with_factors[colname_model_pred] = df_with_factors.loc[:, factor_columns].prod(axis=1)
         return df_with_factors
     
     # you may modify inputs, do not change the output type

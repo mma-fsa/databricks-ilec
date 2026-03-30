@@ -4,8 +4,11 @@
 # base_environment = "model_environment.yaml"
 # environment_version = "5"
 # ///
-from src.model.util.glm import PoissonGLMFactorAnalysis, set_df_categoricals, calc_path_stats
-from src.model.util.tree import PoissonDecisionTree
+# MAGIC %load_ext autoreload
+# MAGIC %autoreload 2
+# MAGIC
+# MAGIC from src.model.util.glm import PoissonGLMFactorAnalysis, set_df_categoricals, calc_path_stats
+# MAGIC from src.model.util.tree import PoissonDecisionTree
 
 # COMMAND ----------
 
@@ -68,9 +71,10 @@ df_test = agg_data(tbl_test).toPandas()
 
 # COMMAND ----------
 
-x_mat_formula = frm.Formula(" ~ cr(Attained_Age, df=4, lower_bound=18, upper_bound=90 )*Smoker_Status*Sex + Face_Amount_Band - 1")
+MODEL_FORMULA = " ~ cr(Attained_Age, df=4, lower_bound=18, upper_bound=90 )*Smoker_Status*Sex + Face_Amount_Band"
 
-#x_mat_formula = frm.Formula(" ~ Attained_Age*Smoker_Status*Sex + Face_Amount_Band - 1")
+# glmnet handles intercept for us
+x_mat_formula = frm.Formula(MODEL_FORMULA + " - 1")
 
 # COMMAND ----------
 
@@ -137,9 +141,10 @@ df_path_stats_test.plot("alpha_index", "d2")
 
 # COMMAND ----------
 
+model_spec = X_train.model_spec
 factor_analysis = PoissonGLMFactorAnalysis(
     glmnet.coef_table(),
-    X_train.model_spec)
+    model_spec)
 
 # check that factors are mapped correctly
 display(factor_analysis.get_factor_map())
@@ -149,151 +154,41 @@ display(factor_analysis.get_factor_map())
 factors = factor_analysis.get_factor_analysis(df_train)
 
 df_factor_chk = df_train.copy()
+df_factor_chk = factor_analysis.append_factor_preds(
+    df_factor_chk
+).rename({"model_pred" : "model_pred_factor"}, axis=1)
 
-
-display(factor_analysis.append_factor_preds(df_train))
-
-
-# COMMAND ----------
-
-factors[2]
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-d2_tweedie_score(
-    y_train,
-    glmnet.predict(X_train, offset=offset_train, alpha_index=99),
-    power=1
+df_factor_chk["model_pred_glm"] = glmnet.predict(
+    X_train, alpha_index=99
 )
 
-# COMMAND ----------
-
-y_preds = glmnet.predict(X_train, offset=offset_train, alpha_index=99)
-
-dtree_train = DecisionTreeRegressor(
-    criterion=
+check_preds = np.allclose(
+    df_factor_chk["model_pred_factor"],
+    df_factor_chk["model_pred_glm"]
 )
 
-# COMMAND ----------
-
-glmnet.alpha = 0.04
-glmnet.aic(X_train, y_train)
-
-# COMMAND ----------
-
-glmnet.coef_path_
+if not check_preds:
+    raise Exception("Factors do not match glm predictions")
+else:
+    print("factor analysis check passed")
 
 # COMMAND ----------
 
-np.sum(y_val) / np.sum(glmnet.predict(
-    X_val,
-    offset=offset_val,
-    alpha_index=40
-))
+import pickle as pkl
+
+pkl.loads(pkl.dumps(glmnet)).coef_table()
 
 # COMMAND ----------
 
-glmnet.coef_table()
-
-# COMMAND ----------
-
-glmnet.alp
-
-# COMMAND ----------
-
-np.where(
-    glmnet.
-)
-
- 
-
-# COMMAND ----------
-
-glmnet.coef_path_[-1,:,90,:]
-
-# COMMAND ----------
-
-# standardized
-glmnet.coef_table()
-
-# COMMAND ----------
-
-# not standardized
-glmnet.coef_table()
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-glmnet.coef_table()
-
-# COMMAND ----------
-
-import xgboost as xgb
-
-# 1. Setup Parameters (Native API style)
-params = {
-    'objective': 'count:poisson',
-    'learning_rate': 0.01,
-    'gamma': 1,
-    'max_depth': 3,
-    'tree_method': 'hist' # Recommended for speed/modern performance
-}
-
-# 2. Wrap data in DMatrix (including margins)
-dtrain = xgb.DMatrix(X_train, label=y_train, base_margin=offset_train)
-dval = xgb.DMatrix(X_val, label=y_val, base_margin=offset_val)
-
-# 3. Train using the native xgb.train function
-# evals is a list of pairs (DMatrix, name) used for early stopping
-bst = xgb.train(
-    params=params,
-    dtrain=dtrain,
-    num_boost_round=1000,
-    evals=[(dval, 'validation')],
-    early_stopping_rounds=10,
-    verbose_eval=50,
-
-)
-
-# 4. Predict
-# The booster uses the base_margin already embedded in dtest
-preds = bst.predict(dval)
-
-np.sum(preds) / np.sum(y_val)
-
-# COMMAND ----------
-
-preprocessor.get_feature_names_out()
-
-# COMMAND ----------
-
-class PoissonXgbModel(mlflow.pyfunc.PythonModel):
-
-    INPUT_COLS = [
-        "Sex",
-        "Smoker_Status",
-        "Face_Amount_Band",
-        "Attained_Age"
-    ]
-    OFFSET_COL = "ExpDth_VBT2015wMI_Cnt"  
-
+class PoissonGLM(mlflow.pyfunc.PythonModel):
+    
     def load_context(self, context):
-        self.preprocessor = joblib.load(context.artifacts["preprocessor"])
-        self.booster = xgb.Booster()
-        self.booster.load_model(context.artifacts["booster"])
-
-    def _load_from_memory(self, 
-                          bst : xgboost.Booster, 
-                          preproc : sklearn.base.TransformerMixin):
-        self.preprocessor = preproc
-        self.booster = bst
+        self.model_spec = joblib.load(context.artifacts["model_spec"])
+        self.glmnet = joblib.load(context.artifacts["glmnet"])
+    
+    def _load_from_memory(self, model_spec:frm.ModelSpec, glmnet:glm.GeneralizedLinearRegressor):
+        self.model_spec = model_spec
+        self.glmnet = glmnet
 
     def predict(self, context, model_input : pd.DataFrame, params=None):
         
@@ -301,52 +196,56 @@ class PoissonXgbModel(mlflow.pyfunc.PythonModel):
 
         if not isinstance(model_input, pd.DataFrame):
             raise Exception(f"Expected model_input to be pandas DataFrame, got: {str(type(model_input))}")
-        
-        offset_col = "ExpDth_VBT2015wMI_Cnt"
 
-        if offset_col in model_input.columns.to_list():
-            offset_col = np.log(model_input[offset_col].to_numpy())
-        else:
-            offset_col = np.zeros((model_input.shape[0]))
+        X_mat = self.model_spec.get_model_matrix(model_input)
+        preds = self.glmnet.predict(
+            X_mat, alpha_index=self.BEST_ALPHA
+        )
 
-        X_proc = self.preprocessor.transform(model_input)
-        dmat = xgb.DMatrix(X_proc, base_margin=offset_col)
-
-        preds = self.booster.predict(dmat)
-
-        # Return DataFrame for stable serving output schema
         return pd.DataFrame({"prediction": preds})
+
+
+# COMMAND ----------
+
+# set additional model parameters
+PoissonGLM.INPUT_COLS = list(model_spec.variables_by_source["data"])
+PoissonGLM.BEST_ALPHA = 99
 
 # write model artfifacts 
 def serialize_artifacts(tmpdir : tempfile.TemporaryDirectory):
-    booster_path = os.path.join(tmpdir, "model.json")
-    bst.save_model(booster_path)
+    
+    model_spec_path = os.path.join(tmpdir, "model_spec.joblib")
+    joblib.dump(model_spec, model_spec_path)
 
-    preproc_path = os.path.join(tmpdir, "preprocessor.joblib")
-    joblib.dump(preprocessor, preproc_path)
+    glmnet_path = os.path.join(tmpdir, "glmnet.joblib")
+    joblib.dump(glmnet, glmnet_path)
+    
+    return (model_spec_path, glmnet_path)
 
-    return (booster_path, preproc_path)
-
-# test serialization
-run_model = PoissonXgbModel()
+# test model predictions + serialization
+run_model = PoissonGLM()
 with tempfile.TemporaryDirectory() as tmpdir:
-    booster_path, preproc_path = serialize_artifacts(tmpdir)
-    new_bst = xgboost.Booster()
-    new_bst.load_model(booster_path)
-    new_preproc = joblib.load(preproc_path)
+    model_spec_path, glmnet_path = serialize_artifacts(tmpdir)
+    new_model_spec = joblib.load(model_spec_path)
+    new_glmnet = joblib.load(glmnet_path)
     run_model._load_from_memory(
-        new_bst,
-        new_preproc,
+        new_model_spec,
+        new_glmnet,
     )
     df_test_run = run_model.predict({}, df_train) 
 
-df_test_run["prediction"].sum() / df_train["Death_Count"].sum()
+y_train_preds = np.sum(
+    df_test_run["prediction"] * df_train["ExpDth_VBT2015wMI_Cnt"]
+)
+
+ae_train = y_train_preds / df_train["Death_Count"].sum()
+ae_train
 
 # COMMAND ----------
 
 with tempfile.TemporaryDirectory() as tmpdir:
     
-    input_example = df_train[PoissonXgbModel.INPUT_COLS].head(5).copy()
+    input_example = df_train[PoissonGLM.INPUT_COLS].head(5).copy()
     
     signature = mlflow.models.infer_signature(
         input_example,
@@ -355,32 +254,29 @@ with tempfile.TemporaryDirectory() as tmpdir:
     )
 
     with mlflow.start_run() as run:
+        
         # Useful metadata / metrics
-        mlflow.log_params(params)
-        ae_ratio_train = float(df_test_run["prediction"].sum() / np.sum(y_train))
-        mlflow.log_metric("val_sum_pred_over_sum_actual", ae_ratio_train)
-        mlflow.log_metric("best_iteration", int(bst.best_iteration))
+        mlflow.log_params({
+            "model_formula" : MODEL_FORMULA
+        })
+    
+        mlflow.log_metric("ae_train", ae_train)
 
-        # Optional: also log the native booster flavor
-        mlflow.xgboost.log_model(
-            xgb_model=bst,
-            name="xgb_native",
-            model_format="json",
-        )
-
+        # model dependencies
+        model_spec_path, glmnet_path = serialize_artifacts(tmpdir)
+        
         # Deployable pyfunc
-        booster_path, preproc_path = serialize_artifacts(tmpdir)
         pyfunc_info = mlflow.pyfunc.log_model(
             name="model",
-            python_model=PoissonXgbModel(),
+            python_model=PoissonGLM(),
             artifacts={
-                "booster": booster_path,
-                "preprocessor": preproc_path,
+                "model_spec": model_spec_path,
+                "glmnet": glmnet_path,
             },
             pip_requirements=[
                 f"mlflow=={mlflow.__version__}",
-                f"xgboost=={xgb.__version__}",
-                f"scikit-learn=={__import__('sklearn').__version__}",
+                f"formulaic=={frm.__version__}",
+                f"glum=={glm.__version__}",
                 f"pandas=={pd.__version__}",
                 f"numpy=={np.__version__}",
                 f"joblib=={joblib.__version__}",
@@ -394,8 +290,47 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 # COMMAND ----------
 
-signature
+URI = "models:/m-4d3ca1327b1a480da3f1ea2cb0265afc"
 
 # COMMAND ----------
 
+from pyspark.sql import functions as F
 
+predict_py = mlflow.pyfunc.load_model(URI)
+predict_udf = mlflow.pyfunc.spark_udf(spark, URI, env_manager="local")
+
+# COMMAND ----------
+
+input_cols = getattr(predict_py.unwrap_python_model(), "INPUT_COLS")
+input_cols
+
+# COMMAND ----------
+
+tbl_w_preds = tbl_ilec_data.withColumn(
+        "prediction",
+        predict_udf(
+            F.struct(*input_cols)
+        )
+    )
+
+output_table_full_name = "workspace.mlops_dev.test_glm_preds"
+
+(
+    tbl_w_preds
+    .write
+    .mode("overwrite")
+    .saveAsTable(output_table_full_name)
+)
+
+# COMMAND ----------
+
+(
+    spark.read.table("workspace.mlops_dev.test_glm_preds")
+    .withColumn("model_pred_cnt", 
+                F.col("prediction") * F.col("ExpDth_VBT2015wMI_Cnt"))
+    .agg(
+        F.sum("model_pred_cnt").alias("model_pred_cnt"),
+        F.sum("Death_Count").alias("Death_Count")
+    )
+    .withColumn("AE", F.col("Death_Count") / F.col("model_pred_cnt"))
+).toPandas()
