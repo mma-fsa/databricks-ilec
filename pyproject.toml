@@ -28,15 +28,15 @@ dev = [
     "hatchling>=1.29.0",
 ]
 
-[project.scripts]
-build_lib_wheel = "lib.wheel_task:main"
+#[project.scripts]
+#build_lib_wheel = "lib.wheel_task:main"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/model"]
+#[tool.hatch.build.targets.wheel]
+#packages = ["src/model"]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+#[build-system]
+#requires = ["hatchling"]
+#build-backend = "hatchling.build"
 
 [tool.ruff]
 line-length = 120

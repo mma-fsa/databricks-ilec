@@ -174,9 +174,8 @@ else:
 
 # COMMAND ----------
 
-import pickle as pkl
-
-pkl.loads(pkl.dumps(glmnet)).coef_table()
+# MAGIC %md
+# MAGIC ### Bundle Model into Pyfunc
 
 # COMMAND ----------
 
@@ -290,12 +289,8 @@ with tempfile.TemporaryDirectory() as tmpdir:
 
 # COMMAND ----------
 
-URI = "models:/m-4d3ca1327b1a480da3f1ea2cb0265afc"
-
-# COMMAND ----------
-
 from pyspark.sql import functions as F
-
+URI = pyfunc_info.model_uri
 predict_py = mlflow.pyfunc.load_model(URI)
 predict_udf = mlflow.pyfunc.spark_udf(spark, URI, env_manager="local")
 

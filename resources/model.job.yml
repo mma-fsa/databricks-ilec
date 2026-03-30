@@ -14,9 +14,7 @@ resources:
       tasks:
         - task_key: notebook_task
           notebook_task:
-            notebook_path: ../src/model/model_xgb.py
-          libraries:
-            - whl: ../dist/*.whl
+            notebook_path: ../src/model/model_glm.py
 
       environments:
         - environment_key: default
