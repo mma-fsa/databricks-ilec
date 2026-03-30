@@ -4,7 +4,7 @@
 # base_environment = "model_environment.yaml"
 # environment_version = "5"
 # ///
-from src.model.util.glm import PoissonGLMFactorAnalysis, set_df_categoricals
+from src.model.util.glm import PoissonGLMFactorAnalysis, set_df_categoricals, calc_path_stats
 from src.model.util.tree import PoissonDecisionTree
 
 # COMMAND ----------
@@ -12,7 +12,6 @@ from src.model.util.tree import PoissonDecisionTree
 import pandas as pd, numpy as np
 from pyspark.sql import functions as F
 import formulaic as frm, sklearn as sk, glum as glm
-from sklearn.metrics import d2_tweedie_score
 import tempfile, os, mlflow, joblib
 
 # COMMAND ----------
@@ -87,11 +86,11 @@ X_train = x_mat_formula.get_model_matrix(
 offset_train = np.log(df_train["ExpDth_VBT2015wMI_Cnt"])
 y_train = df_train["Death_Count"]
 
-X_val = x_mat_formula.get_model_matrix(
+X_test = x_mat_formula.get_model_matrix(
     set_df_categoricals(df_test, default_levels)
 )
-offset_val = np.log(df_test["ExpDth_VBT2015wMI_Cnt"])
-y_val = df_test["Death_Count"]
+offset_test = np.log(df_test["ExpDth_VBT2015wMI_Cnt"])
+y_test = df_test["Death_Count"]
 
 # COMMAND ----------
 
@@ -109,23 +108,32 @@ glmnet.fit(
 # COMMAND ----------
 
 df_train["model_pred"] = glmnet.predict(X_train, offset=offset_train)
-dtree = PoissonDecisionTree("Death_Count", "model_pred")
-dtree.fit(df_train.drop("ExpDth_VBT2015wMI_Cnt", axis=1))
-print(dtree)
+dtree_train = PoissonDecisionTree("Death_Count", "model_pred")
+dtree_train.fit(df_train.drop("ExpDth_VBT2015wMI_Cnt", axis=1))
+print(dtree_train)
 
 
 # COMMAND ----------
 
-coef_at_idx = np.zeros(glmnet.coef_path_.shape[1] + 1)
-coef_at_idx[0] = glmnet.intercept_path_[99]
-coef_at_idx[1:] = glmnet.coef_path_[99, :]
-
-coef_at_idx - glmnet.coef_table().to_numpy()
-
+df_path_stats_train = calc_path_stats(glmnet, X_train, offset_train, y_train)
+df_path_stats_train.plot("alpha_index", "d2")
 
 # COMMAND ----------
 
+df_test["model_pred"] = glmnet.predict(X_test, offset=offset_test)
+dtree_test = PoissonDecisionTree("Death_Count", "model_pred")
+dtree_test.fit(df_test.drop("ExpDth_VBT2015wMI_Cnt", axis=1))
+print(dtree_test)
 
+# COMMAND ----------
+
+df_path_stats_test = calc_path_stats(glmnet, X_test, offset_test, y_test)
+df_path_stats_test.plot("alpha_index", "d2")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Factor Analysis
 
 # COMMAND ----------
 
@@ -133,13 +141,18 @@ factor_analysis = PoissonGLMFactorAnalysis(
     glmnet.coef_table(),
     X_train.model_spec)
 
+# check that factors are mapped correctly
 display(factor_analysis.get_factor_map())
-
 
 # COMMAND ----------
 
 factors = factor_analysis.get_factor_analysis(df_train)
-factors[0]
+
+df_factor_chk = df_train.copy()
+
+
+display(factor_analysis.append_factor_preds(df_train))
+
 
 # COMMAND ----------
 
@@ -147,7 +160,7 @@ factors[2]
 
 # COMMAND ----------
 
-display(factor_analysis.append_factor_preds(df_train))
+
 
 # COMMAND ----------
 

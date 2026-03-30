@@ -4,6 +4,32 @@ from pandas.api.types import is_numeric_dtype, is_object_dtype, is_string_dtype
 from typing import Dict, Iterable, List, Sequence
 import glum as glm
 
+def get_coef_table(glmnet : glm.GeneralizedLinearRegressor, alpha_index : int) -> pd.Series:
+    coef_at_idx = np.zeros(glmnet.coef_path_.shape[1] + 1)
+    coef_at_idx[0] = glmnet.intercept_path_[alpha_index]
+    coef_at_idx[1:] = glmnet.coef_path_[alpha_index, :]
+
+    coef_table = pd.Series(coef_at_idx)
+    coef_table.index = glmnet.coef_table().index
+    
+    return coef_table
+
+def calc_path_stats(glmnet : glm.GeneralizedLinearRegressor, X : pd.DataFrame, offset : pd.Series, y : pd.Series) -> pd.DataFrame:
+    from sklearn.metrics import d2_tweedie_score
+    scores = []
+    for alpha_idx in range(0, int(glmnet.n_alphas)):
+        alpha_preds = glmnet.predict(X, offset=offset, alpha_index=alpha_idx)
+        scores.append(d2_tweedie_score(
+            y,
+            alpha_preds,
+            power=1
+        ))
+    
+    return pd.DataFrame({
+        "alpha_index" : np.arange(0, int(glmnet.n_alphas), 1),
+        "d2" : scores
+    })
+
 def set_df_categoricals(df: pd.DataFrame, default_levels: Dict[str, str]) -> pd.DataFrame:
     result = df.copy()
 
